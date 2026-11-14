@@ -6,7 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from "@blocknote/core";
 import { useCreateBlockNote, createReactBlockSpec, createReactInlineContentSpec, SuggestionMenuController, getDefaultReactSlashMenuItems } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
-import { exportToSvg } from "@excalidraw/excalidraw";
+import { exportScene } from "@excalidraw/excalidraw";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "@blocknote/mantine/style.css";
 import { useApp } from "../ctx.js";
@@ -85,7 +85,7 @@ function DrawingPreview({ path }) {
     let alive = true;
     api.readText(path).then(async (t) => {
       const d = JSON.parse(t);
-      const el = await exportToSvg({ elements: (d.elements ?? []).filter((e) => !e.isDeleted), appState: { ...(d.appState ?? {}), exportBackground: true }, files: d.files ?? {} });
+      const el = await exportScene({ type: "svg", data: { elements: (d.elements ?? []).filter((e) => !e.isDeleted), appState: d.appState ?? {}, files: d.files ?? {} } });
       el.removeAttribute("width"); el.removeAttribute("height");
       // Shown as an <img>: anything odd inside a drawing can't run as code.
       const url = URL.createObjectURL(new Blob([el.outerHTML], { type: "image/svg+xml" }));

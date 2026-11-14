@@ -83,6 +83,7 @@ function Canvas({ file, dark, onApi, paneId, registry }) {
         <MainMenu.DefaultItems.Export />
         <MainMenu.DefaultItems.SaveAsImage />
         <MainMenu.DefaultItems.SearchMenu />
+        <MainMenu.DefaultItems.CommandPalette />
         <MainMenu.DefaultItems.Help />
         <MainMenu.DefaultItems.ClearCanvas />
         <MainMenu.Separator />
