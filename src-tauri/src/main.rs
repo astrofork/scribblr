@@ -41,8 +41,20 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 const SECRET_DIRS: [&str; 7] = [".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".local/share/scribblr/web", "AppData/Roaming/scribblr/web", "AppData/Local/scribblr/web"];
 
 fn resolve(p: &Path) -> PathBuf {
-    // Canonicalise the nearest existing ancestor (the file may not exist yet).
-    let mut base = p.to_path_buf();
+    // First remove "." and ".." by hand: a ".." after a folder that doesn't
+    // exist (/home/me/nope/../../../etc) must not survive to the checks.
+    use std::path::Component;
+    let mut clean = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::ParentDir => { clean.pop(); }
+            Component::CurDir => {}
+            other => clean.push(other.as_os_str()),
+        }
+    }
+    // Then canonicalise the nearest existing ancestor (follows symlinks; the
+    // file itself may not exist yet).
+    let mut base = clean;
     let mut rest = Vec::new();
     while !base.exists() {
         match (base.file_name().map(|f| f.to_os_string()), base.parent()) {
@@ -1161,6 +1173,9 @@ mod tests {
         assert!(guard(&ps(&home.join("Documents/../.ssh/config"))).is_err(), "`..` can't sneak out");
         assert!(guard(&ps(&home.join("Documents/a.note"))).is_ok());
         assert!(guard("/tmp/x.excalidraw").is_ok());
+        // ".." after folders that don't exist can't climb out either.
+        assert!(guard(&ps(&home.join("no-such-dir/../.ssh/id_ed25519"))).is_err());
+        assert!(guard(&ps(&home.join("a/b/../../../../etc/passwd"))).is_err());
     }
 
     #[test]
