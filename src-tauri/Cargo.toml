@@ -19,6 +19,11 @@ portable-pty = "0.9"
 base64 = "0.22"
 url = "2"
 
+# Windows / macOS: web panes are extra Tauri webviews over the window
+# (Tauri's multi-webview API). Linux places WebKitGTK views itself.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tauri = { version = "2", features = ["protocol-asset", "unstable"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
 webkit2gtk = { version = "2.0", features = ["v2_40"] }

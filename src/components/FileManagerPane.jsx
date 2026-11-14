@@ -47,7 +47,9 @@ export default function FileManagerPane({ pane }) {
   const go = (dir) => { if (dir === cwd) return; setBack((b) => [...b, cwd]); setFwd([]); setCwd(dir); setQuery(""); };
   const goBack = () => back.length && (setFwd((f) => [cwd, ...f]), setCwd(back[back.length - 1]), setBack((b) => b.slice(0, -1)));
   const goFwd = () => fwd.length && (setBack((b) => [...b, cwd]), setCwd(fwd[0]), setFwd((f) => f.slice(1)));
-  const up = () => { const p = cwd.slice(0, cwd.lastIndexOf("/")) || "/"; go(p); };
+  // "C:/Users/me" on Windows, "/home/me" elsewhere.
+  const drive = /^[A-Za-z]:/.test(cwd) ? cwd.slice(0, 2) : "";
+  const up = () => { let p = cwd.slice(0, cwd.lastIndexOf("/")); if (!p || p === drive) p = drive ? drive + "/" : "/"; go(p); };
 
   const list = useMemo(() => (query ? items.filter((e) => e.name.toLowerCase().includes(query.toLowerCase())) : items), [items, query]);
   const selected = list.filter((e) => sel.has(e.path));
@@ -115,8 +117,8 @@ export default function FileManagerPane({ pane }) {
   ];
   const crumbs = useMemo(() => {
     const parts = cwd.split("/").filter(Boolean);
-    return parts.map((p, i) => ({ name: p, path: "/" + parts.slice(0, i + 1).join("/") }));
-  }, [cwd]);
+    return parts.map((p, i) => ({ name: p, path: drive ? (i === 0 ? p + "/" : parts.slice(0, i + 1).join("/")) : "/" + parts.slice(0, i + 1).join("/") }));
+  }, [cwd, drive]);
 
   const item = (e, i) => {
     const on = sel.has(e.path);
@@ -167,7 +169,7 @@ export default function FileManagerPane({ pane }) {
         <button className="icon-btn" title="Back (Alt+←)" disabled={!back.length} onClick={goBack}><Icon name="chevron-left" size={16} /></button>
         <button className="icon-btn" title="Forward (Alt+→)" disabled={!fwd.length} onClick={goFwd}><Icon name="chevron-right" size={16} /></button>
         <div className="fm-path">
-          <button onClick={() => go("/")}>/</button>
+          {!drive && <button onClick={() => go("/")}>/</button>}
           {crumbs.map((c, i) => (
             <React.Fragment key={c.path}>
               {i > 0 && <span className="dim">/</span>}

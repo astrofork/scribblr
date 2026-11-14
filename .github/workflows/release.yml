@@ -1,5 +1,5 @@
-# Push a tag like v0.2.0: builds Linux packages (AppImage, .deb, .rpm) and
-# attaches them to a draft GitHub release.
+# Push a tag like v0.2.0: builds Linux (AppImage, .deb, .rpm) and Windows
+# (.exe installer, .msi) packages and attaches them to the GitHub release.
 name: release
 on:
   push:
@@ -7,8 +7,16 @@ on:
 permissions:
   contents: write
 jobs:
-  linux:
-    runs-on: ubuntu-22.04
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04   # oldest glibc we support: runs on most distros
+            args: --bundles appimage,deb,rpm
+          - os: windows-latest
+            args: --bundles nsis,msi
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,7 +24,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with: { workspaces: src-tauri }
-      - name: System libraries
+      - name: Linux libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
@@ -28,4 +37,4 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Scribblr ${{ github.ref_name }}
           releaseDraft: true
-          args: --bundles appimage,deb,rpm
+          args: ${{ matrix.args }}
