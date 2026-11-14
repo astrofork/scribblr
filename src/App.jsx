@@ -40,6 +40,11 @@ export default function App() {
   const [termTitles, setTermTitles] = useState({});
   const setTermTitle = useCallback((id, t) => setTermTitles((m) => (m[id] === t ? m : { ...m, [id]: t })), []);
   const fileOps = useRef({});
+  // AppImage only: offer once to add Scribblr to the apps menu.
+  const [appimage, setAppimage] = useState(null); // null | "ask" | "done" | message
+  useEffect(() => {
+    api.appimageStatus().then((st) => { if (st.is_appimage && !st.integrated && !st.dismissed) setAppimage("ask"); }).catch(() => {});
+  }, []);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -504,6 +509,21 @@ export default function App() {
       <div className={`window ${tab?.full ? "focus-mode" : ""}`}>
         <Sidebar />
         <main className="work">
+          {appimage && (
+            <div className="install-banner">
+              <img src="./scribblr.svg" width="18" height="18" alt="" />
+              {appimage === "ask" ? <>
+                <span>Add Scribblr to your apps menu?</span>
+                <span className="grow" />
+                <button className="solid-btn small" onClick={() => api.appimageIntegrate().then(() => { setAppimage("done"); setTimeout(() => setAppimage(null), 4000); }, (e) => setAppimage(String(e)))}>Add</button>
+                <button className="ghost-btn small" onClick={() => { api.appimageDismiss().catch(() => {}); setAppimage(null); }}>Not now</button>
+              </> : <>
+                <span>{appimage === "done" ? "Added. Scribblr is in your apps menu now." : appimage}</span>
+                <span className="grow" />
+                <button className="ghost-btn small" onClick={() => setAppimage(null)}>Close</button>
+              </>}
+            </div>
+          )}
           <TabsBar />
           <div className="work-body">
             <Workspace />

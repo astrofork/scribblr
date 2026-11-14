@@ -921,13 +921,64 @@ fn web_close(label: String) {
     let _ = label;
 }
 
+
+// ---------- AppImage: add to the apps menu ----------
+// .deb / .rpm install a launcher themselves; an AppImage is a single file, so
+// on first run Scribblr offers (once) to add a launcher and icon to
+// ~/.local/share. $APPIMAGE is set by the AppImage runtime.
+
+const ICON_PNG: &[u8] = include_bytes!("../icons/128x128@2x.png");
+
+#[derive(Serialize)]
+struct AppImageStatus { is_appimage: bool, integrated: bool, dismissed: bool }
+
+fn launcher_path(data: &Path) -> PathBuf { data.join("applications/scribblr-appimage.desktop") }
+
+fn desktop_entry(appimage: &str, icon: &Path) -> String {
+    format!("[Desktop Entry]\nType=Application\nName=Scribblr\nComment=Drawings, notes, terminals and calendars in one tiled workspace\nExec=\"{appimage}\" %U\nIcon={}\nCategories=Office;Graphics;Development;\nStartupWMClass=scribblr\nTerminal=false\n", icon.display())
+}
+
+fn integrate_into(data: &Path, appimage: &str) -> Result<(), String> {
+    let icon = data.join("icons/hicolor/256x256/apps/scribblr.png");
+    fs::create_dir_all(icon.parent().unwrap()).map_err(|e| e.to_string())?;
+    fs::write(&icon, ICON_PNG).map_err(|e| e.to_string())?;
+    let launcher = launcher_path(data);
+    fs::create_dir_all(launcher.parent().unwrap()).map_err(|e| e.to_string())?;
+    atomic_write(&launcher, &desktop_entry(appimage, &icon))
+}
+
+#[tauri::command]
+fn appimage_status() -> AppImageStatus {
+    let appimage = std::env::var("APPIMAGE").ok().filter(|p| Path::new(p).is_file());
+    let data = dirs::data_dir().unwrap_or_default();
+    let integrated = appimage.as_ref().map(|a| {
+        fs::read_to_string(launcher_path(&data)).map(|t| t.contains(a.as_str())).unwrap_or(false)
+    }).unwrap_or(false);
+    let dismissed = config_dir().join("appimage-dismissed").exists();
+    AppImageStatus { is_appimage: appimage.is_some(), integrated, dismissed }
+}
+
+#[tauri::command]
+fn appimage_integrate() -> Result<(), String> {
+    let appimage = std::env::var("APPIMAGE").map_err(|_| "Not running as an AppImage")?;
+    let data = dirs::data_dir().ok_or("no data folder")?;
+    integrate_into(&data, &appimage)?;
+    let _ = std::process::Command::new("update-desktop-database").arg(data.join("applications")).status();
+    Ok(())
+}
+
+#[tauri::command]
+fn appimage_dismiss() -> Result<(), String> {
+    atomic_write(&config_dir().join("appimage-dismissed"), "1")
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             home_dir, read_config, write_config, user_themes, list_drawings,
-            read_text, write_text, create_drawing, rename_path, trash_path, path_exists, herdr_settings, link_index, rewrite_links, save_drawing, set_links, create_item, list_dir, create_dir, create_file, duplicate_path, move_path, term_spawn, term_write, term_resize, term_kill, term_cwd, kitty_config, open_path, copy_paths, web_open, web_bounds, web_nav, web_close
+            read_text, write_text, create_drawing, rename_path, trash_path, path_exists, herdr_settings, link_index, rewrite_links, save_drawing, set_links, create_item, list_dir, create_dir, create_file, duplicate_path, move_path, term_spawn, term_write, term_resize, term_kill, term_cwd, kitty_config, open_path, copy_paths, web_open, web_bounds, web_nav, web_close, appimage_status, appimage_integrate, appimage_dismiss
         ])
         .setup(|app| {
             #[cfg(target_os = "linux")]
@@ -1030,6 +1081,17 @@ mod tests {
         let desk = d.join("evil.desktop");
         fs::write(&desk, "[Desktop Entry]").unwrap();
         assert!(open_path(desk.display().to_string(), false).is_err());
+        fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn appimage_launcher_is_written() {
+        let d = tmp();
+        integrate_into(&d, "/home/me/Apps/Scribblr.AppImage").unwrap();
+        let entry = fs::read_to_string(d.join("applications/scribblr-appimage.desktop")).unwrap();
+        assert!(entry.contains("Exec=\"/home/me/Apps/Scribblr.AppImage\" %U"));
+        assert!(entry.contains("Name=Scribblr") && entry.contains("StartupWMClass=scribblr"));
+        assert!(d.join("icons/hicolor/256x256/apps/scribblr.png").metadata().unwrap().len() > 1000);
         fs::remove_dir_all(d).ok();
     }
 

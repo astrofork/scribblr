@@ -596,3 +596,8 @@ input[type=date]::-webkit-calendar-picker-indicator, input[type=time]::-webkit-c
 /* Ultra fit: the page itself is the whole window. */
 .pane-full.ultra .pane-head, .pane-full.ultra .web-bar { display: none; }
 .pane-full.ultra .web-view { background: var(--background); }
+
+/* AppImage: "Add to apps menu" banner */
+.install-banner { height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: color-mix(in srgb, var(--accent) 12%, var(--chrome)); border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--foreground); animation: pop-in 0.2s ease-out; }
+.install-banner img { border-radius: 4px; }
+.solid-btn.small, .ghost-btn.small { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 6px; }

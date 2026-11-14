@@ -42,6 +42,10 @@ sudo apt install ./Scribblr_*_amd64.deb
 sudo dnf install ./Scribblr-*.x86_64.rpm
 ```
 
+The `.deb` / `.rpm` put Scribblr in your apps menu. The AppImage asks once on
+first run ("Add Scribblr to your apps menu?") and, if you say yes, adds a
+launcher and icon to `~/.local/share` (no root needed).
+
 **Or build it** (needs Node 20+, Rust via rustup, `webkit2gtk-4.1`, `gtk3`):
 
 ```sh
@@ -107,6 +111,7 @@ npx tauri dev              # live-reloading development build
 ```sh
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust: files, links, safety rules
 npx tauri build --no-bundle && python3 -I e2e/run.py   # end-to-end, real app
+npx tauri build --bundles appimage && python3 -I e2e/appimage.py   # AppImage menu banner
 ```
 The end-to-end run uses a throw-away home folder (your files are never
 touched) and needs `tauri-driver` (`cargo install tauri-driver`) and
