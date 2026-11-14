@@ -512,7 +512,7 @@ export default function App() {
         <main className="work">
           {appimage && (
             <div className="install-banner">
-              <img src="./scribblr.svg" width="18" height="18" alt="" />
+              <img src="./scribblr.png" width="18" height="18" alt="" />
               {appimage === "ask" ? <>
                 <span>Add Scribblr to your apps menu?</span>
                 <span className="grow" />

@@ -30,7 +30,7 @@ function Brand() {
     <div className={`brand ${collapsed ? "rail" : ""}`} data-tauri-drag-region>
       {!collapsed && (
         <div className="brand-name" data-tauri-drag-region>
-          <img src="./scribblr.svg" width="20" height="20" alt="" className="brand-logo" />
+          <img src="./scribblr.png" width="20" height="20" alt="" className="brand-logo" />
           <span data-tauri-drag-region>Scribblr</span>
         </div>
       )}

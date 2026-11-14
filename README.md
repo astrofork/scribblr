@@ -1,6 +1,6 @@
 # Scribblr
 
-<img src="src/icons/scribblr.svg" width="96" align="right" alt="Scribblr's goat">
+<img src="docs/icon.png" width="112" align="right" alt="Scribblr's ram logo">
 
 **One tiled workspace for studying, coding and planning.** Drawings
 (Excalidraw), Notion-style notes, a kitty-style terminal and a calendar with

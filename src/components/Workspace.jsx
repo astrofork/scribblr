@@ -143,7 +143,7 @@ export default function Workspace() {
     <div className="panes-stack">
       {!space && (
         <div className="welcome">
-          <img src="./scribblr.svg" width="72" height="72" alt="" />
+          <img src="./scribblr.png" width="72" height="72" alt="" />
           <div className="welcome-title">Welcome to Scribblr</div>
           <div className="welcome-sub">A space is a folder: drawings, notes, calendars and terminals. Add one to start.</div>
           <button className="solid-btn" onClick={() => run("space.new")}>Add a space</button>
