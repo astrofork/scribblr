@@ -1,0 +1,15 @@
+Scribblr
+Copyright 2026 the Scribblr authors. Licensed under the Apache License 2.0.
+
+Scribblr's window design (sidebar, spaces, tabs, framed panes, status bar,
+theme format, keys.json format and built-in theme palettes) is adapted from
+Herdr (herdr.dev), licensed under the Apache License 2.0. "Herdr" and its
+logo are trademarks of their owners; Scribblr is not affiliated with Herdr.
+
+Drawing editor: Excalidraw (@excalidraw/excalidraw), MIT License.
+Notes editor: BlockNote (@blocknote/*), MPL-2.0; Mantine, MIT License.
+Terminal: xterm.js (@xterm/*), MIT License; portable-pty, MIT License.
+The terminal reads kitty.conf and follows kitty's documented defaults;
+no kitty source code (GPL-3.0) is included.
+Icons: Lucide, ISC License. File icons: Material Icon Theme by Philipp Kief
+(the VS Code icon theme), MIT License. UI font: Geist, SIL Open Font License 1.1.
