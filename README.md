@@ -5,7 +5,18 @@
 **One tiled workspace for studying, coding and planning.** Drawings
 (Excalidraw), Notion-style notes, a kitty-style terminal and a calendar with
 to-dos, side by side in Hyprland-style tiles, organised in spaces, linked into
-a graph. A native Linux app (Tauri + Rust), with Herdr's window design.
+a graph. A native desktop app for **Linux and Windows** (Tauri + Rust), with Herdr's
+window design.
+
+![Scribblr: a drawing and a note side by side](docs/screenshots/workspace.png)
+
+| Calendar: small month, the day's pages and notes | Terminal and Files side by side |
+|---|---|
+| ![Calendar](docs/screenshots/calendar.png) | ![Terminal and Files](docs/screenshots/terminal-files.png) |
+
+| Graph of links between drawings, notes and calendars |
+|---|
+| ![Graph](docs/screenshots/graph.png) |
 
 - **Spaces** are folders. Everything you make is a plain file in that folder.
 - **Tiles**: `+` (or a shortcut) opens a drawing, note, terminal, calendar or
@@ -42,11 +53,18 @@ sudo apt install ./Scribblr_*_amd64.deb
 sudo dnf install ./Scribblr-*.x86_64.rpm
 ```
 
+**Windows 10/11:** run `Scribblr_*_x64-setup.exe` (installs for your user, no
+admin needed) or the `.msi`. It uses Microsoft Edge WebView2, which Windows
+11 already has (the installer fetches it on older systems). Windows may warn
+about an unknown publisher because the app isn't code-signed yet: choose
+*More info → Run anyway*.
+
 The `.deb` / `.rpm` put Scribblr in your apps menu. The AppImage asks once on
 first run ("Add Scribblr to your apps menu?") and, if you say yes, adds a
 launcher and icon to `~/.local/share` (no root needed).
 
-**Or build it** (needs Node 20+, Rust via rustup, `webkit2gtk-4.1`, `gtk3`):
+**Or build it** (needs Node 20+ and Rust via rustup; on Linux also
+`webkit2gtk-4.1` and `gtk3`; on Windows the MSVC build tools):
 
 ```sh
 git clone https://github.com/astrofork/scribblr.git && cd scribblr
@@ -82,8 +100,9 @@ npx tauri dev              # live-reloading development build
 9. **Files.** The Files panel (`Ctrl+Shift+E`) and the Files app show every
    file. Click opens; `Ctrl`/`Shift`-click selects, then `Delete`, right-click
    or the selection bar to trash. Drag onto folders to move.
-10. **Terminal** uses your shell and your `kitty.conf` font, size, cursor and
-    keys; colours follow the theme (or kitty's: Settings → Terminal colours).
+10. **Terminal** uses your shell (PowerShell on Windows) and your `kitty.conf`
+    font, size, cursor and keys; colours follow the theme (or kitty's:
+    Settings → Terminal colours).
 11. **Web apps** keep their logins per space. Sign-in pop-ups open as small
     windows. `Ctrl +/−/0` zooms the page.
 12. **Settings** (`Ctrl+,`): light/dark, themes (your Herdr themes too),
@@ -112,6 +131,7 @@ npx tauri dev              # live-reloading development build
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust: files, links, safety rules
 npx tauri build --no-bundle && python3 -I e2e/run.py   # end-to-end, real app
 npx tauri build --bundles appimage && python3 -I e2e/appimage.py   # AppImage menu banner
+python3 -I e2e/screenshots.py dark      # regenerate the README screenshots
 ```
 The end-to-end run uses a throw-away home folder (your files are never
 touched) and needs `tauri-driver` (`cargo install tauri-driver`) and

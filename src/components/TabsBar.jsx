@@ -4,6 +4,11 @@ import React, { useRef } from "react";
 import { useApp } from "../ctx.js";
 import { Icon } from "../icons.jsx";
 import { tabName, tabIcon } from "./Sidebar.jsx";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
+// Windows and macOS have no tiling WM to manage the frameless window, so the
+// tab bar gets minimise / maximise / close (Linux tiling WMs don't need them).
+const WINDOW_BUTTONS = /Windows|Macintosh/.test(navigator.userAgent);
 
 export default function TabsBar() {
   const { state, space, tab, dispatch, run, openMenu, termTitles } = useApp();
@@ -51,6 +56,13 @@ export default function TabsBar() {
           <Icon name={v === "files" ? "files" : "link"} size={14} /> {v === "files" ? "Files" : "Links"}
         </button>
       ))}
+      {WINDOW_BUTTONS && (
+        <div className="win-buttons">
+          <button title="Minimise" onClick={() => getCurrentWindow().minimize()}>—</button>
+          <button title="Maximise" onClick={() => getCurrentWindow().toggleMaximize()}>▢</button>
+          <button className="close" title="Close" onClick={() => getCurrentWindow().close()}>✕</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -273,7 +273,8 @@ export default function App() {
     const obj = arg && typeof arg === "object" ? arg : {};
     switch (cmd) {
       case "space.new": {
-        const folder = await openDialog({ directory: true, title: "Choose a folder for the new space" });
+        let folder = await openDialog({ directory: true, title: "Choose a folder for the new space" });
+        if (folder) folder = folder.replace(/\\/g, "/"); // Windows paths: "/" everywhere in the app
         if (folder) dispatch({ type: "space.add", name: folder.split("/").filter(Boolean).pop() ?? folder, folder });
         return;
       }

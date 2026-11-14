@@ -10,6 +10,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+/// A path for the UI: always with "/" so the frontend can split it the same
+/// way on every system (Windows accepts "/" too).
+fn ps(p: &Path) -> String {
+    let s = p.display().to_string();
+    if cfg!(windows) { s.replace('\\', "/") } else { s }
+}
+
 fn config_dir() -> PathBuf {
     let dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("scribblr");
     let _ = fs::create_dir_all(dir.join("themes"));
@@ -31,11 +38,23 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 // (home, /tmp, removable drives), never its own browser data, and never
 // secrets like ~/.ssh or ~/.gnupg, even if a bug or a malicious page in the
 // app's webview tried to ask for them.
-const SECRET_DIRS: [&str; 5] = [".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".local/share/scribblr/web"];
+const SECRET_DIRS: [&str; 7] = [".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".local/share/scribblr/web", "AppData/Roaming/scribblr/web", "AppData/Local/scribblr/web"];
 
 fn resolve(p: &Path) -> PathBuf {
-    // Canonicalise the nearest existing ancestor (the file may not exist yet).
-    let mut base = p.to_path_buf();
+    // First remove "." and ".." by hand: a ".." after a folder that doesn't
+    // exist (/home/me/nope/../../../etc) must not survive to the checks.
+    use std::path::Component;
+    let mut clean = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::ParentDir => { clean.pop(); }
+            Component::CurDir => {}
+            other => clean.push(other.as_os_str()),
+        }
+    }
+    // Then canonicalise the nearest existing ancestor (follows symlinks; the
+    // file itself may not exist yet).
+    let mut base = clean;
     let mut rest = Vec::new();
     while !base.exists() {
         match (base.file_name().map(|f| f.to_os_string()), base.parent()) {
@@ -55,7 +74,21 @@ fn guard(path: &str) -> Result<PathBuf, String> {
     if !p.is_absolute() { return Err("Paths must be absolute".into()); }
     let real = resolve(p);
     let home = dirs::home_dir().map(|h| fs::canonicalize(&h).unwrap_or(h)).unwrap_or_default();
-    let roots = [home.clone(), PathBuf::from("/tmp"), PathBuf::from("/media"), PathBuf::from("/mnt"), PathBuf::from("/run/media")];
+    let tmp = fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    #[cfg(unix)]
+    let roots = vec![home.clone(), tmp, PathBuf::from("/tmp"), PathBuf::from("/media"), PathBuf::from("/mnt"), PathBuf::from("/run/media"), PathBuf::from("/Volumes")];
+    // Windows: your profile, temp, and other drives (D:, E:...) but not the
+    // system drive's Windows / Program Files folders.
+    #[cfg(windows)]
+    let roots = {
+        let mut r = vec![home.clone(), tmp];
+        let sys = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into()).to_uppercase();
+        for d in b'D'..=b'Z' {
+            let drive = format!("{}:", d as char);
+            if drive != sys { if let Ok(c) = fs::canonicalize(format!("{drive}\\")) { r.push(c); } }
+        }
+        r
+    };
     if !roots.iter().any(|r| !r.as_os_str().is_empty() && real.starts_with(r)) {
         return Err(format!("Scribblr only works inside your home folder and drives ({})", real.display()));
     }
@@ -67,7 +100,7 @@ fn guard(path: &str) -> Result<PathBuf, String> {
 
 #[tauri::command]
 fn home_dir() -> String {
-    dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_default()
+    dirs::home_dir().map(|p| ps(&p)).unwrap_or_default()
 }
 
 /// Reads a config file (state.json, keys.json, settings.json); None if missing.
@@ -155,10 +188,10 @@ fn walk(dir: &Path, depth: usize) -> Vec<Entry> {
         if is_dir {
             let children = walk(&path, depth + 1);
             if !children.is_empty() {
-                out.push(Entry { name, path: path.display().to_string(), dir: true, children });
+                out.push(Entry { name, path: ps(&path), dir: true, children });
             }
         } else if is_drawing(&name) {
-            out.push(Entry { name, path: path.display().to_string(), dir: false, children: vec![] });
+            out.push(Entry { name, path: ps(&path), dir: false, children: vec![] });
         }
     }
     out.sort_by(|a, b| b.dir.cmp(&a.dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
@@ -206,7 +239,7 @@ fn create_item(folder: String, name: String, ext: String) -> Result<String, Stri
         let path = dir.join(file);
         if !path.exists() {
             atomic_write(&path, template(ext))?;
-            return Ok(path.display().to_string());
+            return Ok(ps(&path));
         }
         n += 1;
     }
@@ -236,7 +269,7 @@ fn rename_path(from: String, to_name: String) -> Result<String, String> {
         return Err("Something with that name already exists".into());
     }
     fs::rename(&from, &to).map_err(|e| e.to_string())?;
-    Ok(to.display().to_string())
+    Ok(ps(&to))
 }
 
 /// Moves a drawing into the space's `.trash` folder instead of deleting it.
@@ -269,17 +302,30 @@ fn herdr_settings() -> Option<String> {
 #[tauri::command]
 fn open_path(path: String, reveal: bool) -> Result<(), String> {
     let p = guard(&path)?;
-    let target = if reveal && !p.is_dir() { p.parent().map(|x| x.to_path_buf()).unwrap_or(p) } else { p };
-    if !reveal && target.is_file() {
-        use std::os::unix::fs::PermissionsExt;
-        let name = target.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        let exec = fs::metadata(&target).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false);
-        let launcher = [".desktop", ".appimage", ".sh", ".run", ".bin", ".exe", ".jar"].iter().any(|e| name.ends_with(e));
-        if exec || launcher {
-            return Err("This is a program. For safety Scribblr won't start it; run it from a terminal if you trust it.".into());
-        }
+    if reveal {
+        return tauri_plugin_opener::reveal_item_in_dir(&p).map_err(|e| e.to_string());
     }
-    std::process::Command::new("xdg-open").arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
+    if p.is_file() && is_program(&p) {
+        return Err("This is a program. For safety Scribblr won't start it; run it yourself if you trust it.".into());
+    }
+    #[cfg(target_os = "linux")]
+    { std::process::Command::new("xdg-open").arg(&p).spawn().map(|_| ()).map_err(|e| e.to_string()) }
+    #[cfg(not(target_os = "linux"))]
+    { tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| e.to_string()) }
+}
+
+/// Files that would run code if "opened": executables and launchers.
+fn is_program(p: &Path) -> bool {
+    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    const LAUNCHERS: [&str; 21] = [".desktop", ".appimage", ".sh", ".run", ".bin", ".exe", ".jar", ".bat", ".cmd", ".com", ".ps1",
+        ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".msi", ".lnk", ".scr", ".app"];
+    if LAUNCHERS.iter().any(|e| name.ends_with(e)) { return true; }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::metadata(p).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false) { return true; }
+    }
+    false
 }
 
 #[tauri::command]
@@ -437,7 +483,7 @@ fn list_dir(path: String, hidden: bool) -> Result<Vec<DirEntry>, String> {
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
             let modified = meta.and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-            Some(DirEntry { name, path: e.path().display().to_string(), dir, size, modified })
+            Some(DirEntry { name, path: ps(&e.path()), dir, size, modified })
         })
         .collect();
     out.sort_by(|a, b| b.dir.cmp(&a.dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
@@ -470,7 +516,7 @@ fn create_dir(parent: String, name: String) -> Result<String, String> {
     guard(&parent)?;
     let p = free_name(Path::new(&parent), &plain_name(&name)?);
     fs::create_dir_all(&p).map_err(|e| e.to_string())?;
-    Ok(p.display().to_string())
+    Ok(ps(&p))
 }
 
 #[tauri::command]
@@ -483,7 +529,7 @@ fn create_file(parent: String, name: String) -> Result<String, String> {
     }
     let p = free_name(Path::new(&parent), &name);
     fs::write(&p, "").map_err(|e| e.to_string())?;
-    Ok(p.display().to_string())
+    Ok(ps(&p))
 }
 
 fn copy_rec(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -512,7 +558,7 @@ fn duplicate_path(path: String) -> Result<String, String> {
     };
     let to = free_name(parent, &copy_name);
     copy_rec(&from, &to).map_err(|e| e.to_string())?;
-    Ok(to.display().to_string())
+    Ok(ps(&to))
 }
 
 /// Copies files/folders into a folder (paste); returns the new paths.
@@ -528,7 +574,7 @@ fn copy_paths(paths: Vec<String>, to_dir: String) -> Result<Vec<String>, String>
         let name = from.file_name().ok_or("no name")?.to_string_lossy().to_string();
         let to = free_name(&dir, &name);
         copy_rec(&from, &to).map_err(|e| e.to_string())?;
-        out.push(to.display().to_string());
+        out.push(ps(&to));
     }
     Ok(out)
 }
@@ -546,7 +592,7 @@ fn move_path(from: String, to_dir: String) -> Result<String, String> {
     let name = from.file_name().ok_or("no name")?.to_string_lossy().to_string();
     let to = free_name(&to_dir, &name);
     fs::rename(&from, &to).map_err(|e| e.to_string())?;
-    Ok(to.display().to_string())
+    Ok(ps(&to))
 }
 
 // ---------- terminal (a real shell on a pseudo-terminal) ----------
@@ -567,12 +613,25 @@ static TERMS: Mutex<Option<HashMap<String, Term>>> = Mutex::new(None);
 #[derive(Serialize, Clone)]
 struct TermData { id: String, data: String }
 
+/// The user's shell: $SHELL on Linux/macOS, PowerShell (or cmd) on Windows.
+fn default_shell() -> Option<String> {
+    #[cfg(windows)]
+    {
+        for c in ["pwsh.exe", "powershell.exe"] {
+            if std::process::Command::new("where").arg(c).output().map(|o| o.status.success()).unwrap_or(false) { return Some(c.into()); }
+        }
+        return std::env::var("COMSPEC").ok();
+    }
+    #[cfg(not(windows))]
+    std::env::var("SHELL").ok()
+}
+
 /// Starts the user's shell (or `shell`) in `cwd`; output arrives as `term-data` events.
 #[tauri::command]
 fn term_spawn(app: AppHandle, id: String, cwd: String, cols: u16, rows: u16, shell: Option<String>) -> Result<(), String> {
     let pty = native_pty_system();
     let pair = pty.openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
-    let sh = shell.filter(|s| !s.is_empty()).or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| "/bin/sh".into());
+    let sh = shell.filter(|s| !s.is_empty()).or_else(default_shell).unwrap_or_else(|| "/bin/sh".into());
     let mut cmd = CommandBuilder::new(&sh);
     if Path::new(&cwd).is_dir() { cmd.cwd(&cwd); } else if let Some(h) = dirs::home_dir() { cmd.cwd(h); }
     // Don't hand the shell variables from whatever started Scribblr: e.g.
@@ -635,8 +694,13 @@ fn term_kill(id: String) {
 fn term_cwd(id: String) -> Option<String> {
     let g = TERMS.lock().unwrap();
     let t = g.as_ref()?.get(&id)?;
-    let pid = t.master.process_group_leader().or_else(|| t.child.process_id().map(|p| p as i32))?;
-    fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| p.display().to_string())
+    #[cfg(target_os = "linux")]
+    {
+        let pid = t.master.process_group_leader().or_else(|| t.child.process_id().map(|p| p as i32))?;
+        fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| ps(&p))
+    }
+    #[cfg(not(target_os = "linux"))]
+    { let _ = t; None }
 }
 
 /// kitty.conf (with its includes) as settings, so the terminal looks like kitty.
@@ -716,11 +780,11 @@ mod web {
                 let safe: String = space.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
                 let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("scribblr/web").join(if safe.is_empty() { "default".into() } else { safe });
                 let _ = fs::create_dir_all(&base);
-                let data = base.display().to_string();
-                let cache = base.join("cache").display().to_string();
+                let data = ps(&base);
+                let cache = ps(&base.join("cache"));
                 let manager = WebsiteDataManager::builder().base_data_directory(data.as_str()).base_cache_directory(cache.as_str()).build();
                 if let Some(cookies) = manager.cookie_manager() {
-                    cookies.set_persistent_storage(&base.join("cookies.sqlite").display().to_string(), CookiePersistentStorage::Sqlite);
+                    cookies.set_persistent_storage(&ps(&base.join("cookies.sqlite")), CookiePersistentStorage::Sqlite);
                 }
                 WebContext::with_website_data_manager(&manager)
             }).clone()
@@ -888,39 +952,137 @@ mod web {
     }
 }
 
-// Sync commands run on the main (GTK) thread, which the web views need.
+// Windows / macOS: each web pane is an extra Tauri webview over the window
+// (multi-webview API), with its own data folder per space. Keys pressed in
+// the page (F11, Ctrl+Shift+F, Esc) come back through a tiny script that
+// navigates to scribblr-key://… which is caught and turned into an event.
+#[cfg(not(target_os = "linux"))]
+mod web {
+    use super::*;
+    use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
+    static ZOOM: Mutex<Option<HashMap<String, f64>>> = Mutex::new(None);
+
+    const KEYS: &str = r#"addEventListener('keydown', e => {
+      const k = e.key === 'F11' ? 'ultra' : (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') ? 'full' : e.key === 'Escape' ? 'escape' : null;
+      if (!k) return;
+      if (k !== 'escape') e.preventDefault();
+      try { location.assign('scribblr-key://' + k); } catch (_) {}
+    }, true);"#;
+
+    fn data_dir(space: &str) -> PathBuf {
+        let safe: String = space.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        let d = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("scribblr/web").join(if safe.is_empty() { "default".into() } else { safe });
+        let _ = fs::create_dir_all(&d);
+        d
+    }
+
+    pub fn open(app: AppHandle, label: String, url: String, space: String, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+        if !(url.starts_with("https://") || url.starts_with("http://")) { return Err("Web panes only open http(s) pages".into()); }
+        if let Some(wv) = app.get_webview(&label) {
+            wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+            wv.set_size(LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
+            return wv.show().map_err(|e| e.to_string());
+        }
+        let window = app.get_window("main").ok_or("no main window")?;
+        let target: tauri::Url = url.parse().map_err(|e: url::ParseError| e.to_string())?;
+        let (a1, a2, a3, l1, l2, l3) = (app.clone(), app.clone(), app.clone(), label.clone(), label.clone(), label.clone());
+        let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
+            .data_directory(data_dir(&space))
+            .initialization_script(KEYS)
+            .on_navigation(move |u| {
+                if u.scheme() == "scribblr-key" {
+                    let _ = a3.emit("web-key", WebKey { label: l3.clone(), action: u.host_str().unwrap_or("").to_string() });
+                    return false;
+                }
+                u.scheme() == "https" || u.scheme() == "http" || u.scheme() == "about" || u.scheme() == "blob" || u.scheme() == "data"
+            })
+            .on_page_load(move |wv, p| {
+                let loading = matches!(p.event(), tauri::webview::PageLoadEvent::Started);
+                let zoom = ZOOM.lock().unwrap().as_ref().and_then(|m| m.get(&l1).copied()).unwrap_or(1.0);
+                let title = wv.url().map(|u| u.host_str().unwrap_or("").to_string()).unwrap_or_default();
+                let _ = a1.emit("web-load", WebLoad { label: l1.clone(), loading, progress: if loading { 0.2 } else { 1.0 }, zoom });
+                let _ = a1.emit("web-event", WebEvent { label: l1.clone(), url: p.url().to_string(), title });
+            })
+            .on_document_title_changed(move |wv, title| {
+                let url = wv.url().map(|u| u.to_string()).unwrap_or_default();
+                let _ = a2.emit("web-event", WebEvent { label: l2.clone(), url, title });
+            });
+        window.add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn bounds(app: &AppHandle, label: String, x: f64, y: f64, w: f64, h: f64, visible: bool) {
+        let Some(wv) = app.get_webview(&label) else { return };
+        if !visible { let _ = wv.hide(); return; }
+        let _ = wv.set_position(LogicalPosition::new(x, y));
+        let _ = wv.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)));
+        let _ = wv.show();
+    }
+
+    pub fn nav(app: &AppHandle, label: String, action: String, url: Option<String>) {
+        let Some(wv) = app.get_webview(&label) else { return };
+        let mut zoom = |d: Option<f64>| {
+            let mut g = ZOOM.lock().unwrap();
+            let m = g.get_or_insert_with(HashMap::new);
+            let z = d.map(|d| ((m.get(&label).copied().unwrap_or(1.0) + d).clamp(0.3, 3.0) * 10.0).round() / 10.0).unwrap_or(1.0);
+            m.insert(label.clone(), z);
+            let _ = wv.set_zoom(z);
+        };
+        match action.as_str() {
+            "back" => { let _ = wv.eval("history.back()"); }
+            "forward" => { let _ = wv.eval("history.forward()"); }
+            "reload" => { let _ = wv.reload(); }
+            "stop" => { let _ = wv.eval("window.stop()"); }
+            "zoom-in" => zoom(Some(0.1)),
+            "zoom-out" => zoom(Some(-0.1)),
+            "zoom-reset" => zoom(None),
+            "focus" => { let _ = wv.set_focus(); }
+            "go" => if let Some(u) = url.filter(|u| u.starts_with("https://") || u.starts_with("http://")) {
+                if let Ok(u) = u.parse() { let _ = wv.navigate(u); }
+            },
+            _ => {}
+        }
+    }
+
+    pub fn zoom_of(label: &str) -> f64 {
+        ZOOM.lock().unwrap().as_ref().and_then(|m| m.get(label).copied()).unwrap_or(1.0)
+    }
+
+    pub fn close(app: &AppHandle, label: String) {
+        if let Some(wv) = app.get_webview(&label) { let _ = wv.close(); }
+    }
+}
+
+// Linux: sync commands run on the main (GTK) thread, which WebKitGTK needs.
 #[tauri::command]
 fn web_open(app: AppHandle, label: String, url: String, space: String, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    { web::open(app, label, url, space, x, y, w, h) }
-    #[cfg(not(target_os = "linux"))]
-    { let _ = (app, label, url, space, x, y, w, h); Err("web panes are Linux-only for now".into()) }
+    web::open(app, label, url, space, x, y, w, h)
 }
 
 #[tauri::command]
-fn web_bounds(label: String, x: f64, y: f64, w: f64, h: f64, visible: bool) {
+fn web_bounds(app: AppHandle, label: String, x: f64, y: f64, w: f64, h: f64, visible: bool) {
     #[cfg(target_os = "linux")]
-    web::bounds(label, x, y, w, h, visible);
+    { let _ = app; web::bounds(label, x, y, w, h, visible); }
     #[cfg(not(target_os = "linux"))]
-    let _ = (label, x, y, w, h, visible);
+    web::bounds(&app, label, x, y, w, h, visible);
 }
 
 #[tauri::command]
-fn web_nav(label: String, action: String, url: Option<String>) -> f64 {
+fn web_nav(app: AppHandle, label: String, action: String, url: Option<String>) -> f64 {
     #[cfg(target_os = "linux")]
-    { web::nav(label.clone(), action, url); web::zoom_of(&label) }
+    { let _ = app; web::nav(label.clone(), action, url); }
     #[cfg(not(target_os = "linux"))]
-    { let _ = (label, action, url); 1.0 }
+    web::nav(&app, label.clone(), action, url);
+    web::zoom_of(&label)
 }
 
 #[tauri::command]
-fn web_close(label: String) {
+fn web_close(app: AppHandle, label: String) {
     #[cfg(target_os = "linux")]
-    web::close(label);
+    { let _ = app; web::close(label); }
     #[cfg(not(target_os = "linux"))]
-    let _ = label;
+    web::close(&app, label);
 }
-
 
 // ---------- AppImage: add to the apps menu ----------
 // .deb / .rpm install a launcher themselves; an AppImage is a single file, so
@@ -1000,16 +1162,20 @@ mod tests {
         d
     }
 
+    #[cfg(unix)]
     #[test]
     fn guard_blocks_outside_and_secrets() {
         assert!(guard("/etc/passwd").is_err());
         assert!(guard("relative/path").is_err());
         let home = dirs::home_dir().unwrap();
-        assert!(guard(&home.join(".ssh/id_ed25519").display().to_string()).is_err());
-        assert!(guard(&home.join(".local/share/scribblr/web/x/cookies.sqlite").display().to_string()).is_err());
-        assert!(guard(&home.join("Documents/../.ssh/config").display().to_string()).is_err(), "`..` can't sneak out");
-        assert!(guard(&home.join("Documents/a.note").display().to_string()).is_ok());
+        assert!(guard(&ps(&home.join(".ssh/id_ed25519"))).is_err());
+        assert!(guard(&ps(&home.join(".local/share/scribblr/web/x/cookies.sqlite"))).is_err());
+        assert!(guard(&ps(&home.join("Documents/../.ssh/config"))).is_err(), "`..` can't sneak out");
+        assert!(guard(&ps(&home.join("Documents/a.note"))).is_ok());
         assert!(guard("/tmp/x.excalidraw").is_ok());
+        // ".." after folders that don't exist can't climb out either.
+        assert!(guard(&ps(&home.join("no-such-dir/../.ssh/id_ed25519"))).is_err());
+        assert!(guard(&ps(&home.join("a/b/../../../../etc/passwd"))).is_err());
     }
 
     #[test]
@@ -1030,7 +1196,7 @@ mod tests {
     #[test]
     fn create_rename_link_rewrite() {
         let d = tmp();
-        let f = d.display().to_string();
+        let f = ps(&d);
         let a = create_item(f.clone(), "Alpha".into(), ".note".into()).unwrap();
         let a2 = create_item(f.clone(), "Alpha".into(), ".note".into()).unwrap();
         assert!(a.ends_with("Alpha.note") && a2.ends_with("Alpha 2.note"));
@@ -1053,7 +1219,7 @@ mod tests {
     #[test]
     fn files_copy_move_trash() {
         let d = tmp();
-        let f = d.display().to_string();
+        let f = ps(&d);
         let sub = create_dir(f.clone(), "sub".into()).unwrap();
         let t = create_file(f.clone(), "notes.txt".into()).unwrap();
         let dup = duplicate_path(t.clone()).unwrap();
@@ -1070,6 +1236,7 @@ mod tests {
         fs::remove_dir_all(d).ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn open_path_refuses_programs() {
         use std::os::unix::fs::PermissionsExt;
@@ -1077,10 +1244,10 @@ mod tests {
         let exe = d.join("run-me");
         fs::write(&exe, "#!/bin/sh\necho hi").unwrap();
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(open_path(exe.display().to_string(), false).is_err());
+        assert!(open_path(ps(&exe), false).is_err());
         let desk = d.join("evil.desktop");
         fs::write(&desk, "[Desktop Entry]").unwrap();
-        assert!(open_path(desk.display().to_string(), false).is_err());
+        assert!(open_path(ps(&desk), false).is_err());
         fs::remove_dir_all(d).ok();
     }
 
