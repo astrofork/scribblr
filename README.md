@@ -45,7 +45,7 @@ sudo dnf install ./Scribblr-*.x86_64.rpm
 **Or build it** (needs Node 20+, Rust via rustup, `webkit2gtk-4.1`, `gtk3`):
 
 ```sh
-git clone <this repo> && cd scribblr
+git clone https://github.com/astrofork/scribblr.git && cd scribblr
 npm install
 npx tauri build            # packages in src-tauri/target/release/bundle/
 npx tauri dev              # live-reloading development build
