@@ -180,6 +180,14 @@ export function Settings({ close }) {
             <button className={`seg ${(look.termColors ?? "app") === "app" ? "on" : ""}`} onClick={() => dispatch({ type: "look", look: { termColors: "app" } })}>Match the app theme</button>
             <button className={`seg ${look.termColors === "kitty" ? "on" : ""}`} onClick={() => dispatch({ type: "look", look: { termColors: "kitty" } })}>Kitty's colours</button>
           </div>
+          <div className="set-label">Terminal font</div>
+          <div className="segs">
+            <button className={`seg ${look.termFont !== "kitty" ? "on" : ""}`} onClick={() => dispatch({ type: "look", look: { termFont: "herdr" } })}>Herdr style (JetBrains Mono)</button>
+            <button className={`seg ${look.termFont === "kitty" ? "on" : ""}`} onClick={() => dispatch({ type: "look", look: { termFont: "kitty" } })}>From kitty.conf</button>
+            <button className="seg" onClick={() => dispatch({ type: "look", look: { termFontSize: Math.max(8, (look.termFontSize ?? 14) - 1) } })}>−</button>
+            <span className="seg-val">{look.termFontSize ?? 14}</span>
+            <button className="seg" onClick={() => dispatch({ type: "look", look: { termFontSize: Math.min(32, (look.termFontSize ?? 14) + 1) } })}>+</button>
+          </div>
           <div className="set-label">Web apps</div>
           <div className="segs">
             <button className={`seg ${look.webUltra !== false ? "on" : ""}`} onClick={() => dispatch({ type: "look", look: { webUltra: true } })}>Ultra fit on (F11)</button>

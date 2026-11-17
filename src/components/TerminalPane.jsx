@@ -8,13 +8,15 @@ import { api } from "../api.js";
 export default function TerminalPane({ pane, focused }) {
   const { kitty, theme, dispatch, setTermTitle, space, state } = useApp();
   const mode = state.look.termColors ?? "app";
+  const opts = { fontSize: state.look.termFontSize ?? undefined, useKittyFont: state.look.termFont === "kitty" };
+  const optsKey = JSON.stringify(opts);
   const box = useRef(null);
   const sess = useRef(null);
 
   useEffect(() => {
     const s = getSession(pane.id, {
       cwd: pane.cwd ?? space?.folder,
-      kitty, theme, mode,
+      kitty, theme, mode, opts,
       onTitle: (t) => setTermTitle(pane.id, t),
       // Like kitty: the window closes when its shell ends.
       onExit: () => dispatch({ type: "pane.close", pane: pane.id }),
@@ -31,7 +33,7 @@ export default function TerminalPane({ pane, focused }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.id]);
 
-  useEffect(() => { if (sess.current) { retheme(sess.current, kitty, theme, mode); sess.current.el.parentElement && (sess.current.el.parentElement.style.background = sess.current.look.theme.background); } }, [theme, kitty, mode]);
+  useEffect(() => { if (sess.current) { retheme(sess.current, kitty, theme, mode, opts); sess.current.el.parentElement && (sess.current.el.parentElement.style.background = sess.current.look.theme.background); } }, [theme, kitty, mode, optsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (focused) sess.current?.term.focus(); }, [focused]);
 
   return <div className="terminal-pane" ref={box} style={{ background: sess.current?.look.theme.background ?? theme.colors.background }} onPointerDown={() => sess.current?.term.focus()} />;

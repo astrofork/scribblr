@@ -31,17 +31,17 @@ function listenOnce() {
   return listening;
 }
 
-export function getSession(id, { cwd, kitty, theme, mode, onTitle, onExit }) {
+export function getSession(id, { cwd, kitty, theme, mode, opts, onTitle, onExit }) {
   let s = sessions.get(id);
   if (s) { s.onTitle = onTitle; s.onExit = onExit; return s; }
   listenOnce();
-  const look = kittyLook(kitty, theme, mode);
+  const look = kittyLook(kitty, theme, mode, opts);
   const term = new Terminal({
     minimumContrastRatio: look.minimumContrastRatio,
     allowProposedApi: true,
     fontFamily: look.fontFamily,
     fontSize: look.fontSize,
-    lineHeight: 1.0,
+    lineHeight: look.lineHeight,
     cursorStyle: look.cursorStyle,
     cursorBlink: look.cursorBlink,
     scrollback: look.scrollback,
@@ -57,7 +57,7 @@ export function getSession(id, { cwd, kitty, theme, mode, onTitle, onExit }) {
   term.unicode.activeVersion = "11";
   const el = document.createElement("div");
   el.className = "term-host";
-  el.style.padding = `${look.padding}px`;
+  el.style.padding = look.padding == null ? "12px 14px" : `${look.padding}px`;
   el.style.background = look.theme.background;
   s = { id, term, fit, el, look, started: false, exited: false, onTitle, onExit, fontSize: look.fontSize, baseFont: look.fontSize };
   sessions.set(id, s);
@@ -74,28 +74,52 @@ export function getSession(id, { cwd, kitty, theme, mode, onTitle, onExit }) {
 }
 
 // Puts the session's terminal into `container` and starts the shell once.
+// The shell starts only once the pane has settled at its real size (two
+// frames in a row the same), so the first prompt isn't drawn for a narrow
+// half-laid-out pane and then repainted (which left broken prompt copies).
 export function attach(s, container, shell) {
   if (s.el.parentElement !== container) container.appendChild(s.el);
-  requestAnimationFrame(() => {
+  let last = "", tries = 0;
+  const settle = () => {
     try { s.fit.fit(); } catch { /* not visible yet */ }
-    const { cols, rows } = s.term;
+    const size = `${s.term.cols}x${s.term.rows}`;
+    if ((size !== last || !s.el.offsetWidth) && tries++ < 30) { last = size; requestAnimationFrame(settle); return; }
     if (!s.started) {
       s.started = true;
-      api.termSpawn(s.id, s.cwd ?? "", cols, rows, shell).catch((e) => s.term.write(`\r\n[could not start shell: ${e}]\r\n`));
-    } else if (!s.exited) api.termResize(s.id, cols, rows).catch(() => {});
-  });
+      s.sent = size;
+      api.termSpawn(s.id, s.cwd ?? "", s.term.cols, s.term.rows, shell).catch((e) => s.term.write(`\r\n[could not start shell: ${e}]\r\n`));
+    } else sendSize(s);
+  };
+  requestAnimationFrame(settle);
+}
+
+// Tell the shell its new size once resizing stops (each SIGWINCH makes fish
+// and zsh repaint their prompt; a burst of them left stacked prompt copies).
+function sendSize(s) {
+  clearTimeout(s.sizeTimer);
+  s.sizeTimer = setTimeout(() => {
+    const size = `${s.term.cols}x${s.term.rows}`;
+    if (!s.started || s.exited || size === s.sent) return;
+    s.sent = size;
+    api.termResize(s.id, s.term.cols, s.term.rows).catch(() => {});
+  }, 120);
 }
 
 export function refit(s) {
   if (!s.el.isConnected || !s.el.offsetWidth) return;
-  const { cols, rows } = s.term;
   try { s.fit.fit(); } catch { return; }
-  if (s.started && !s.exited && (cols !== s.term.cols || rows !== s.term.rows)) api.termResize(s.id, s.term.cols, s.term.rows).catch(() => {});
+  sendSize(s);
 }
 
 // The app's theme changed: the terminal follows it.
-export function retheme(s, kitty, theme, mode) {
-  const look = kittyLook(kitty, theme, mode);
+export function retheme(s, kitty, theme, mode, opts) {
+  const look = kittyLook(kitty, theme, mode, opts);
+  if (s.term.options.fontSize !== look.fontSize || s.term.options.fontFamily !== look.fontFamily) {
+    s.term.options.fontSize = look.fontSize; s.term.options.fontFamily = look.fontFamily;
+    s.baseFont = s.fontSize = look.fontSize;
+    s.el.style.padding = look.padding == null ? "12px 14px" : `${look.padding}px`;
+    requestAnimationFrame(() => refit(s));
+  }
   s.term.options.minimumContrastRatio = look.minimumContrastRatio;
   s.look.theme = look.theme;
   s.term.options.theme = look.theme;
