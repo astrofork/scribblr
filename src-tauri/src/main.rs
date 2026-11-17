@@ -772,6 +772,30 @@ mod web {
         vbox.pack_start(&overlay, true, true, 0);
         overlay.show_all();
         LAYER.with(|l| *l.borrow_mut() = Some(fixed));
+
+        // Two-finger pinch on a touchpad: WebKit would zoom the whole app.
+        // Instead pass it to the page as Ctrl+wheel (what browsers do), so
+        // a drawing zooms its canvas and the rest of the app stays put.
+        if let Ok(view) = main.clone().downcast::<WebView>() {
+            let last = std::rc::Rc::new(std::cell::Cell::new(1.0f64));
+            view.connect_event(move |v, ev| {
+                if ev.event_type() != gtk::gdk::EventType::TouchpadPinch { return gtk::glib::Propagation::Proceed; }
+                let Some(p) = ev.downcast_ref::<gtk::gdk::EventTouchpadPinch>() else { return gtk::glib::Propagation::Stop };
+                let scale = p.scale();
+                if p.is_phase() { /* begin/end */ }
+                let prev = last.get();
+                last.set(if (scale - 1.0).abs() < 1e-6 { 1.0 } else { scale });
+                if prev <= 0.0 || scale <= 0.0 || (scale - prev).abs() < 1e-4 { return gtk::glib::Propagation::Stop; }
+                let delta = -(scale / prev).ln() * 220.0;
+                let z = v.zoom_level().max(0.1);
+                let (x, y) = p.position();
+                let js = format!(
+                    "(function(x,y,d){{var el=document.elementFromPoint(x,y)||document.body;el.dispatchEvent(new WheelEvent('wheel',{{clientX:x,clientY:y,deltaY:d,deltaMode:0,ctrlKey:true,bubbles:true,cancelable:true}}));}})({},{},{})",
+                    x / z, y / z, delta);
+                v.evaluate_javascript(&js, None, None, None::<&gtk::gio::Cancellable>, |_| {});
+                gtk::glib::Propagation::Stop
+            });
+        }
     }
 
     fn context(space: &str) -> WebContext {

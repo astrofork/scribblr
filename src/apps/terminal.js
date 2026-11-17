@@ -69,6 +69,22 @@ export function getSession(id, { cwd, kitty, theme, mode, opts, onTitle, onExit 
   try { term.loadAddon(new WebglAddon()); } catch { /* falls back to the DOM renderer */ }
   term.onData((d) => !s.exited && api.termWrite(id, d).catch(() => {}));
   term.onTitleChange((t) => s.onTitle?.(t));
+  // Shells that recolour the terminal (OSC 4/10/11/12…, e.g. a wallpaper
+  // theme script in fish) would fight the app theme; xterm also can't read
+  // the "11;[100]#rrggbb" form, so only the text colour changed and output
+  // came out pale on a light background. With "Match the app theme" these
+  // are ignored; with "Kitty's colours" the background form is understood.
+  s.mode = mode;
+  for (const code of [4, 10, 11, 12, 17, 19, 104, 110, 111, 112, 708]) {
+    term.parser.registerOscHandler(code, (data) => {
+      if (s.mode !== "kitty") return true; // swallowed: the theme decides
+      if (code === 11 || code === 708) {
+        const m = /^(?:\[\d+\])?(#[0-9a-f]{6})$/i.exec(data.trim());
+        if (m) { term.options.theme = { ...term.options.theme, background: m[1] }; s.edgeBg = null; return true; }
+      }
+      return false; // xterm's own handling
+    });
+  }
   // Like Ghostty / Herdr: the padding takes the colour of the edge cells, so
   // full-screen apps (nvim, htop) look edge-to-edge instead of framed.
   let edgeQueued = false;
@@ -185,6 +201,7 @@ export function refit(s) {
 
 // The app's theme changed: the terminal follows it.
 export function retheme(s, kitty, theme, mode, opts) {
+  s.mode = mode;
   const look = kittyLook(kitty, theme, mode, opts);
   if (s.term.options.fontSize !== look.fontSize || s.term.options.fontFamily !== look.fontFamily) {
     s.term.options.fontSize = look.fontSize; s.term.options.fontFamily = look.fontFamily;
@@ -219,6 +236,15 @@ export const allSessions = () => sessions;
 window.__scribblrTerminalInfo = () => [...sessions.values()].map((s) => {
   const d = s.term._core?._renderService?.dimensions;
   return { rows: s.term.rows, cols: s.term.cols, cellH: d?.css?.cell?.height, canvasH: d?.css?.canvas?.height, proposed: s.fit.proposeDimensions() };
+});
+window.__scribblrCellInfo = (text) => [...sessions.values()].map((s) => {
+  const b = s.term.buffer.active;
+  for (let y = 0; y < b.length; y++) {
+    const line = b.getLine(y), str = line?.translateToString(true) ?? "";
+    const x = str.indexOf(text);
+    if (x >= 0) { const c = line.getCell(x); return { y, x, fgMode: c.isFgRGB() ? "rgb" : c.isFgPalette() ? "palette" : "default", fg: c.getFgColor(), dim: c.isDim(), bold: c.isBold(), italic: c.isItalic(), bgDefault: c.isBgDefault(), theme: { fg: s.term.options.theme.foreground, bg: s.term.options.theme.background, black: s.term.options.theme.black } }; }
+  }
+  return null;
 });
 window.__scribblrTerminalText = () => [...sessions.values()].map((s) => {
   const b = s.term.buffer.active, out = [];
