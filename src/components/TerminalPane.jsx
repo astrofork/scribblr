@@ -36,5 +36,5 @@ export default function TerminalPane({ pane, focused }) {
   useEffect(() => { if (sess.current) { retheme(sess.current, kitty, theme, mode, opts); sess.current.el.parentElement && (sess.current.el.parentElement.style.background = sess.current.look.theme.background); } }, [theme, kitty, mode, optsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (focused) sess.current?.term.focus(); }, [focused]);
 
-  return <div className="terminal-pane" ref={box} style={{ background: sess.current?.look.theme.background ?? theme.colors.background }} onPointerDown={() => sess.current?.term.focus()} />;
+  return <div className="terminal-pane" ref={box} style={{ background: sess.current?.edgeBg ?? sess.current?.look.theme.background ?? theme.colors.background }} onPointerDown={() => sess.current?.term.focus()} />;
 }

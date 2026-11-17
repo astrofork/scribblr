@@ -10,7 +10,7 @@ import { isGraph } from "../links.js";
 export default function LinksPanel() {
   const { tab, graph, openFile, openLink, run, home, dispatch, removeLink } = useApp();
   const file = tab && panesOf(tab.root).find((p) => p.id === tab.focused)?.file;
-  const real = file && !isGraph(file) ? file : null;
+  const real = file && !isGraph(file) && !file.startsWith("scribblr:") ? file : null;
   const outs = real ? graph.outgoing.get(real) ?? [] : [];
   const backs = real ? [...new Set(graph.backlinks.get(real) ?? [])] : [];
   const row = (key, icon, label, detail, onClick, ghost, onSplit, onRemove) => (
