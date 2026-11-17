@@ -57,18 +57,21 @@ export function getSession(id, { cwd, kitty, theme, mode, opts, onTitle, onExit 
   term.unicode.activeVersion = "11";
   const el = document.createElement("div");
   el.className = "term-host";
-  el.style.padding = look.padding == null ? "12px 14px" : `${look.padding}px`;
   el.style.background = look.theme.background;
   s = { id, term, fit, el, look, started: false, exited: false, onTitle, onExit, fontSize: look.fontSize, baseFont: look.fontSize };
   sessions.set(id, s);
 
   term.open(el);
+  // Padding goes on xterm's own element: the fit addon subtracts that one
+  // (padding on the host made it fit one row too many, cutting the last).
+  term.element.style.padding = look.padding == null ? "12px 14px" : `${look.padding}px`;
   try { term.loadAddon(new WebglAddon()); } catch { /* falls back to the DOM renderer */ }
   term.onData((d) => !s.exited && api.termWrite(id, d).catch(() => {}));
   term.onTitleChange((t) => s.onTitle?.(t));
   term.attachCustomKeyEventHandler((e) => kittyAction(e, s, look));
   s.cwd = cwd;
   s.kitty = kitty ?? {};
+  s.refit = () => refit(s);
   s.stopTrail = attachCursorTrail(s);
   return s;
 }
@@ -80,6 +83,9 @@ export function getSession(id, { cwd, kitty, theme, mode, opts, onTitle, onExit 
 export function attach(s, container, shell) {
   if (s.el.parentElement !== container) container.appendChild(s.el);
   let last = "", tries = 0;
+  // The terminal font may still be loading: measuring cells with a fallback
+  // font gave too many rows (the bottom line was cut off). Wait for fonts.
+  const fontsReady = document.fonts?.ready ?? Promise.resolve();
   const settle = () => {
     try { s.fit.fit(); } catch { /* not visible yet */ }
     const size = `${s.term.cols}x${s.term.rows}`;
@@ -90,8 +96,13 @@ export function attach(s, container, shell) {
       api.termSpawn(s.id, s.cwd ?? "", s.term.cols, s.term.rows, shell).catch((e) => s.term.write(`\r\n[could not start shell: ${e}]\r\n`));
     } else sendSize(s);
   };
-  requestAnimationFrame(settle);
+  fontsReady.then(() => requestAnimationFrame(settle));
 }
+
+// A font finishing loading changes the cell size: refit every terminal.
+document.fonts?.addEventListener?.("loadingdone", () => {
+  for (const s of sessions.values()) { s.term.options.fontFamily = s.term.options.fontFamily; refit(s); }
+});
 
 // Tell the shell its new size once resizing stops (each SIGWINCH makes fish
 // and zsh repaint their prompt; a burst of them left stacked prompt copies).
@@ -108,6 +119,8 @@ function sendSize(s) {
 export function refit(s) {
   if (!s.el.isConnected || !s.el.offsetWidth) return;
   try { s.fit.fit(); } catch { return; }
+  // Repaint everything at the new cell size (no leftovers of the old grid).
+  s.term.refresh(0, s.term.rows - 1);
   sendSize(s);
 }
 
@@ -117,8 +130,8 @@ export function retheme(s, kitty, theme, mode, opts) {
   if (s.term.options.fontSize !== look.fontSize || s.term.options.fontFamily !== look.fontFamily) {
     s.term.options.fontSize = look.fontSize; s.term.options.fontFamily = look.fontFamily;
     s.baseFont = s.fontSize = look.fontSize;
-    s.el.style.padding = look.padding == null ? "12px 14px" : `${look.padding}px`;
-    requestAnimationFrame(() => refit(s));
+    s.term.element.style.padding = look.padding == null ? "12px 14px" : `${look.padding}px`;
+    requestAnimationFrame(() => { refit(s); setTimeout(() => refit(s), 90); });
   }
   s.term.options.minimumContrastRatio = look.minimumContrastRatio;
   s.look.theme = look.theme;
@@ -143,6 +156,10 @@ export const allSessions = () => sessions;
 // Read-only peek used by the end-to-end tests (e2e/run.py): the visible text
 // of every terminal. The WebGL renderer draws to a canvas, so tests can't
 // read the screen from the page.
+window.__scribblrTerminalInfo = () => [...sessions.values()].map((s) => {
+  const d = s.term._core?._renderService?.dimensions;
+  return { rows: s.term.rows, cols: s.term.cols, cellH: d?.css?.cell?.height, canvasH: d?.css?.canvas?.height, proposed: s.fit.proposeDimensions() };
+});
 window.__scribblrTerminalText = () => [...sessions.values()].map((s) => {
   const b = s.term.buffer.active, out = [];
   for (let i = 0; i < b.length; i++) out.push(b.getLine(i)?.translateToString(true) ?? "");

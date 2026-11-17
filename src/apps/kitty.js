@@ -110,7 +110,9 @@ function run(action, s) {
       const v = args[args.length - 1];
       s.fontSize = v === "0" ? s.baseFont : v.startsWith("+") || v.startsWith("-") ? Math.max(6, s.fontSize + parseFloat(v)) : parseFloat(v);
       t.options.fontSize = s.fontSize;
-      requestAnimationFrame(() => { try { s.fit.fit(); } catch { /* hidden */ } });
+      // Refit and tell the shell the new size (vim/nvim redraw for it).
+      // (The new cell size is measured a moment later, so fit twice.)
+      requestAnimationFrame(() => { s.refit?.(); setTimeout(() => s.refit?.(), 90); });
       return true;
     }
     default: return null; // not ours
